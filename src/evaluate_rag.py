@@ -31,7 +31,7 @@ def setup_rag_chain():
     # 1. 載入 Chroma 語意檢索器 (Load Chroma Semantic Retriever)
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
-    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
     # 2. 🌟 新增：載入 BM25 關鍵字檢索器 (Load BM25 Keyword Retriever)
     if not os.path.exists("splits.pkl"):
@@ -39,7 +39,7 @@ def setup_rag_chain():
     with open("splits.pkl", "rb") as f:
         splits = pickle.load(f)
     bm25_retriever = BM25Retriever.from_documents(splits)
-    bm25_retriever.k = 5
+    bm25_retriever.k = 10
 
     # 3. 🌟 新增：融合兩個檢索器 (Combine both into an Ensemble Retriever)
     # weights=[0.5, 0.5] 代表語意和關鍵字各佔 50% 權重
@@ -69,16 +69,51 @@ def run_evaluation():
         print(f"Initialization Error: {e}")
         return
 
-    # 測試題庫 (Test Dataset)
+    # ==========================================
+    # 🧪 升級版測試題庫 (Upgraded Test Suite)
+    # 涵蓋 RM, EVK, Yocto, Porting Guide 與 Test Plan
+    # ==========================================
     test_suite = [
-        {"Level": "1 (Basic)", "Topic": "Memory Map", "Question": "What is the base address of the GPIO1 module?"},
-        {"Level": "1 (Basic)", "Topic": "Registers", "Question": "In the LPUART module, what is the register offset for the Watermark Register (WATER)?"},
-        {"Level": "1 (Basic)", "Topic": "Core", "Question": "Does the Cortex-M33 core support TCM (Tightly Coupled Memory)? If so, what is its primary purpose?"},
-        {"Level": "2 (Cross-Para)", "Topic": "Boot", "Question": "Please list the primary boot devices supported by the i.MX 93 ROM."},
-        {"Level": "2 (Cross-Para)", "Topic": "GPIO", "Question": "To configure a pad as a GPIO output, which specific register inside the IOMUXC needs to be modified, and what should be written to the GPIO Direction Register (GDIR)?"},
-        {"Level": "2 (Cross-Para)", "Topic": "Power", "Question": "What are the different power modes available in the i.MX 93, and which module is primarily responsible for controlling system resets (SRC)?"},
-        {"Level": "3 (Advanced)", "Topic": "Debugging", "Question": "I am trying to use LPI2C1 to communicate with a sensor, but there is no signal on the pins. As a firmware engineer, what steps should I check regarding the Clock (CCM) and Pin Mux (IOMUXC) configurations based on the manual?"},
-        {"Level": "3 (Advanced)", "Topic": "Arch", "Question": "According to the reference manual, what is the main division of tasks between the Cortex-A55 and the Cortex-M33 in the i.MX 93 architecture?"}
+        {
+            "Level": "1 (Basic)", 
+            "Topic": "Board Physical (EVK)", 
+            "Question": "According to the i.MX 93 EVK Board User Manual, what is the I2C address of the PMIC (PCA9451A), and which I2C bus is it connected to?"
+        },
+        {
+            "Level": "1 (Basic)", 
+            "Topic": "MCU Memory Map (RM)", 
+            "Question": "What is the memory base address of the LPI2C2 module on the i.MX93?"
+        },
+        {
+            "Level": "2 (Cross-Doc)", 
+            "Topic": "Boot Configuration", 
+            "Question": "I want to boot the i.MX 93 EVK from the onboard eMMC. According to the board manual and reference manual, what should be the value of the BOOT_MODE[3:0] DIP switches?"
+        },
+        {
+            "Level": "2 (Yocto/Build)", 
+            "Topic": "Yocto Bitbake", 
+            "Question": "In the Yocto Project, which specific bitbake task is responsible for fetching the source code, and what 'devtool' command can I use to modify a recipe's source code interactively?"
+        },
+        {
+            "Level": "2 (System/Arch)", 
+            "Topic": "Dual-Core IPC", 
+            "Question": "How does the Cortex-A55 communicate with the Cortex-M33 in the i.MX93? Briefly explain the role of the Messaging Unit (MU)."
+        },
+        {
+            "Level": "3 (Advanced)", 
+            "Topic": "Linux Device Tree", 
+            "Question": "Based on the i.MX Porting Guide, what are the essential properties I need to define in a Device Tree (DTS) node to enable an I2C sensor device on the LPI2C bus?"
+        },
+        {
+            "Level": "3 (Advanced)", 
+            "Topic": "Test Plan Generation", 
+            "Question": "I need to write a test plan for the LPUART interface. According to the 'Unit Tests' chapter in the i.MX Linux Reference Manual, what is the standard method to test the UART loopback or basic transmit/receive functionality?"
+        },
+        {
+            "Level": "3 (Toolchain)", 
+            "Topic": "J-Link Debugging", 
+            "Question": "I am experiencing a HardFault on the Cortex-M33. Based on the J-Link Commander manual and EVK manual, which connector on the i.MX 93 EVK provides JTAG/SWD access, and what basic J-Link command can I use to halt the CPU and read a register?"
+        }
     ]
 
     results = []
@@ -92,7 +127,6 @@ def run_evaluation():
         try:
             response = rag_chain.invoke({"input": test["Question"]})
             answer = response["answer"]
-            # 計算花費時間 (Calculate time taken)
             time_taken = round(time.time() - start_time, 2)
         except Exception as e:
             answer = f"Error: {e}"
@@ -109,10 +143,11 @@ def run_evaluation():
         time.sleep(1) # 暫停 1 秒避免觸發 API 頻率限制 (Pause for 1 sec to avoid API rate limits)
 
     # 輸出成 Pandas DataFrame (Output as Pandas DataFrame)
+    import pandas as pd
     df = pd.DataFrame(results)
     
     # 儲存為 CSV 檔案 (Save to CSV)
-    csv_filename = "rag_evaluation_report.csv"
+    csv_filename = "rag_evaluation_report_v2.csv"
     df.to_csv(csv_filename, index=False, encoding="utf-8-sig")
     
     print("\n✅ Evaluation Complete!")
@@ -122,6 +157,5 @@ def run_evaluation():
     # 在終端機印出簡化的表格結果 (Print simplified table in terminal)
     print("\n📊 Summary Table:")
     print(df[["Test ID", "Topic", "Time (s)", "AI Answer"]].to_string(max_colwidth=50))
-
 if __name__ == "__main__":
     run_evaluation()

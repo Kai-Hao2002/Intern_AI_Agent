@@ -38,7 +38,7 @@ def start_query_engine():
     print("📚 Connecting to existing vector database...")
     embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
     vectorstore = Chroma(persist_directory=DB_PATH, embedding_function=embeddings)
-    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 5})
+    chroma_retriever = vectorstore.as_retriever(search_kwargs={"k": 10})
 
     # 2. 🌟 新增：載入 BM25 關鍵字檢索器 (Load BM25 Keyword Retriever)
     if not os.path.exists("splits.pkl"):
@@ -46,7 +46,7 @@ def start_query_engine():
     with open("splits.pkl", "rb") as f:
         splits = pickle.load(f)
     bm25_retriever = BM25Retriever.from_documents(splits)
-    bm25_retriever.k = 5
+    bm25_retriever.k = 10
 
     # 3. 🌟 新增：融合兩個檢索器 (Combine both into an Ensemble Retriever)
     # weights=[0.5, 0.5] 代表語意和關鍵字各佔 50% 權重
