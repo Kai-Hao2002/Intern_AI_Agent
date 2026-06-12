@@ -1,0 +1,18 @@
+// flash_m33.jlink
+// 指定目標晶片 (請根據你實際的 i.MX93 具體型號調整，例如 MIMX9352_M33)
+device MIMX9352_M33
+// 使用 SWD 介面
+if SWD
+// 設定連線速度 (kHz)
+speed 4000
+// 連線至目標板
+connect
+// 暫停 CPU
+h
+// 將編譯出來的 Hex 或 Bin 檔案燒錄到指定的記憶體位址 (請替換為實際的輸出檔名與位址)
+loadfile ./Objects/M33_Firmware.hex
+// 重置並執行
+r
+g
+// 退出 J-Link Commander
+qc

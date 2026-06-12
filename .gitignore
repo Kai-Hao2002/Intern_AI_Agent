@@ -29,3 +29,4 @@ build_log.txt
 # 原始 PDF 文件 (視公司規定，通常不把大檔傳上 Git)
 docs/*.pdf
 docs/processed/*.pdf
+docs/*.png
