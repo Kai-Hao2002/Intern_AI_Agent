@@ -1,0 +1,70 @@
+{
+  "NXP_iMX93_Reference": {
+    "path": "./docs/i.MX_Reference_Manual.pdf",
+    "prefix": "IMX93_",
+    "chapters": {
+      "01_Memory_Maps": [34, 90],
+      "02_System_Boot_Flow": [249, 297],
+      "03_Cortex_A55": [303, 305],
+      "04_Cortex_M33": [306, 373],
+      "05_Messaging_Unit": [585, 639],
+      "06_System_Debug_JTAG": [1272, 1290],
+      "07_IOMUX_and_Pins": [1291, 1712],
+      "08_GPIO": [1713, 1737],
+      "09_Clock_Power_CCM_SRC": [1738, 2072],
+      "10_Storage_uSDHC": [2369, 2520],
+      "11_USB": [2768, 2914],
+      "12_LPI2C": [4753, 4822],
+      "13_LPSPI": [4823, 4870],
+      "14_LPUART": [4871, 4940]
+    }
+  },
+  "Yocto_Mega_Manual": {
+    "path": "./docs/Yocto_Mega_Manual.pdf",
+    "prefix": "Yocto_",
+    "chapters": {
+      "01_Concepts_Overview": [23, 92],
+      "02_Reference_Manual": [119, 496],
+      "03_BSP_Guide": [497, 522],
+      "04_Dev_Tasks": [523, 766],
+      "05_Kernel_Dev": [767, 832],
+      "06_Test_Environment": [989, 1022]
+    }
+  },
+  "NXP_iMX93_EVK_UM": {
+    "path": "./docs/EVK_Board_User_Manual.pdf",
+    "prefix": "IMX93_EVK_",
+    "chapters": {
+      "01_Physical_Connectors_Switches": [10, 13],
+      "02_I2C_Interface": [19, 20],
+      "03_Boot_Configuration": [21, 22],
+      "04_Storage_SD_eMMC_QSPI": [25, 26],
+      "05_CAN_USB_Interfaces": [26, 27],
+      "06_Expansion_and_Debug_JTAG": [30, 33]
+    }
+  },
+  "NXP_iMX_Porting_Guide": {
+    "path": "./docs/i.MX_Porting_Guide.pdf",
+    "prefix": "IMX_PORT_",
+    "chapters": {
+      "01_Porting_Kernel_UBoot": [3, 12],
+      "02_IOMUX_UART_SDHC_SPI": [21, 25],
+      "03_I2C_Interface": [33, 35],
+      "04_Ethernet_USB": [41, 46]
+    }
+  },
+  "NXP_iMX_Linux_RM": {
+    "path": "./docs/i.MX_Linux_Reference_Manual.pdf",
+    "prefix": "IMX_LNX_RM_",
+    "chapters": {
+      "01_System_IOMUX_GPIO_Clock": [11, 19],
+      "02_Storage_MMC_SPI": [51, 55],
+      "03_SPI_Flash": [58, 60],
+      "04_ECSPI_I2C": [72, 75],
+      "05_USB_LPUART_LPSPI": [90, 98],
+      "06_LPSPI": [105, 106],
+      "07_Unit_Tests_System_Storage": [270, 273],
+      "08_Unit_Tests_Connectivity": [273, 277]
+    }
+  }
+}

@@ -1,3 +1,4 @@
+# tools/serial_monitor_tool.py
 import serial
 import time
 import os
@@ -7,49 +8,59 @@ load_dotenv()
 
 DEFAULT_BAUDRATE = int(os.getenv("TARGET_BAUDRATE", 115200))
 
-def monitor_uart_log(port_name: str, duration: int = 5):
+def monitor_uart_log(port_name: str, duration: int = 5, max_retries: int = 3):
     """
     連接到指定的序列埠，持續監聽指定秒數的日誌。
-    如果發現 'panic', 'HardFault' 或 'Error' 等關鍵字，立刻回報。
+    加入重試機制，防止因為暫時性的 USB 斷線導致腳本崩潰。
+    Connect to the specified sequence port and continuously listen to the logs for a specified number of seconds.
+    Add a retry mechanism to prevent the script from crashing due to temporary USB disconnection.
     """
-    print(f"📡 正在連接序列埠: {port_name}，準備監聽 {duration} 秒...")
+    print(f"📡 Connecting to sequence port: {port_name}, preparing to listen for {duration} seconds...")
     
     captured_logs = []
     error_detected = False
+    ser = None
     
-    try:
-        # 使用環境變數定義的 baudrate / Use baudrate defined by env variables
-        ser = serial.Serial(port_name, DEFAULT_BAUDRATE, timeout=1)
-        
-        end_time = time.time() + duration
-        while time.time() < end_time:
-            if ser.in_waiting > 0:
-                # 讀取一行並解碼
-                line = ser.readline().decode('utf-8', errors='ignore').strip()
-                if line:
-                    captured_logs.append(line)
-                    # 偵測危險關鍵字
-                    if "panic" in line.lower() or "hardfault" in line.lower():
-                        error_detected = True
-                        
-        ser.close()
-        
-    except serial.SerialException as e:
-        return False, f"❌ 無法開啟序列埠 {port_name}：{e}"
+    for attempt in range(1, max_retries + 1):
+        try:
+            ser = serial.Serial(port_name, DEFAULT_BAUDRATE, timeout=1)
+            print(f"✅ Successfully opened serial port {port_name} (attempts: {attempt}/{max_retries})")
+            break
+        except serial.SerialException as e:
+            if attempt == max_retries:
+                return False, f"❌ 嚴重錯誤：無法開啟序列埠 {port_name}。已重試 {max_retries} 次皆失敗。錯誤細節：{e}\n🚨 [系統指令]: 請回報使用者檢查硬體連線或 USB 驅動。"
+            
+            print(f"⚠️ Unable to open sequence port, will try again in {2} seconds ({attempt}/{max_retries})...")
+            time.sleep(2)
+
+    if ser and ser.is_open:
+        try:
+            end_time = time.time() + duration
+            while time.time() < end_time:
+                if ser.in_waiting > 0:
+                    line = ser.readline().decode('utf-8', errors='ignore').strip()
+                    if line:
+                        captured_logs.append(line)
+                        if "panic" in line.lower() or "hardfault" in line.lower() or "error" in line.lower():
+                            error_detected = True
+                            
+        except serial.SerialException as e:
+            return False, f"❌ 警告：在監聽過程中序列埠突然中斷連線！錯誤細節：{e}"
+        finally:
+            ser.close()
 
     if not captured_logs:
-        return True, "✅ 監聽結束，未收到任何 UART 輸出 (可能開發板尚未開機)。"
+        return True, "✅ The listening session ended, and no UART output was received (the development board may not be powered on or may be in a timeout state)."
 
     log_summary = "\n".join(captured_logs)
     
     if error_detected:
-        return False, f"❌ 警告！在 UART 日誌中偵測到系統崩潰 (Crash)：\n{log_summary}"
+        return False, f"❌ 警告！在 UART 日誌中偵測到系統崩潰或異常：\n{log_summary}"
     else:
         return True, f"✅ 系統運作正常，擷取到的日誌如下：\n{log_summary}"
 
 if __name__ == "__main__":
-    # 這裡的 port_name 需要替換成 mock_board_uart.py 印出來的路徑
-    test_port = input("請輸入虛擬序列埠路徑 (例如 /dev/ttys001): ")
+    test_port = input("Please enter the virtual sequence port path (e.g., /dev/ttys001): ")
     success, report = monitor_uart_log(test_port, duration=8)
     print("\n" + "="*40)
     print(report)

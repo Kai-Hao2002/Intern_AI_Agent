@@ -1,18 +1,18 @@
 // flash_m33.jlink
-// 指定目標晶片 (請根據你實際的 i.MX93 具體型號調整，例如 MIMX9352_M33)
+// Specify the target chip (Please adjust according to your actual i.MX93 model, e.g., MIMX9352_M33)
 device MIMX9352_M33
-// 使用 SWD 介面
+// Use SWD interface
 if SWD
-// 設定連線速度 (kHz)
+// Set connection speed (kHz)
 speed 4000
-// 連線至目標板
+// Connect to the target board
 connect
-// 暫停 CPU
+// Pause CPU
 h
-// 將編譯出來的 Hex 或 Bin 檔案燒錄到指定的記憶體位址 (請替換為實際的輸出檔名與位址)
+// Flash the compiled Hex or Bin file to the specified memory address 
 loadfile ./Objects/M33_Firmware.hex
-// 重置並執行
+// Reset and execute
 r
 g
-// 退出 J-Link Commander
+// Exit J-Link Commander
 qc

@@ -1,3 +1,4 @@
+# rag/ingest_data.py
 import os
 import shutil
 import pickle
@@ -15,7 +16,6 @@ DB_PATH = "./chroma_db"
 # ==========================================
 # 🌐 網頁資源設定區 (Web Resources)
 # ==========================================
-# 將你需要 AI 閱讀的網址直接貼在這裡
 WEB_URLS = [
     "https://www.keil.com/support/man/docs/uv4cl/uv4cl_commandline.htm", # Keil MDK CLI
     "https://kb.segger.com/J-Link_Commander",                            # J-Link Commander
@@ -47,7 +47,7 @@ def parse_pdf_with_markdown_tables(file_path):
                 # Convert the entire table to a lowercase string to determine its type
                 table_text_lower = str(table).lower()
                 
-                # 💡 智慧注入 (Smart Injection): 根據表格內容決定要加什麼隱藏標籤
+                # 智慧注入 (Smart Injection): 
                 if "start address" in table_text_lower or "start" in table_text_lower and "end" in table_text_lower:
                     # 如果表格有 Start/End Address，這才是真正的記憶體映射表！
                     # If it has Start/End Address, this is the REAL Memory Map!
@@ -92,19 +92,19 @@ def build_vector_database():
         for filename in os.listdir(DOC_PATH):
             file_path = os.path.join(DOC_PATH, filename)
             
-            # 判斷如果是 PDF，就用 PDFPlumberLoader
+            # If it's PDF, using PDFPlumberLoader
             if filename.lower().endswith(".pdf"):
                 print(f"   📖 Reading PDF: {filename}")
                 parsed_docs = parse_pdf_with_markdown_tables(file_path)
                 docs.extend(parsed_docs)
                 
-            # 判斷如果是 Markdown 或 TXT，就用 TextLoader
+            # If it's Markdown or TXT, using TextLoader
             elif filename.lower().endswith(".md") or filename.lower().endswith(".txt"):
                 print(f"   📝 Reading Text/Markdown: {filename}")
                 loader = TextLoader(file_path, encoding='utf-8')
                 docs.extend(loader.load())
                 
-            # 其他不認識的檔案就跳過
+            # Skip unknow format
             else:
                 print(f"   ⏩ Skipping unsupported file: {filename}")
     else:
@@ -114,18 +114,18 @@ def build_vector_database():
     if WEB_URLS:
         print("\n🌐 Loading Web documents via WebBaseLoader...")
         try:
-            # WebBaseLoader 支援直接傳入網址 List
+            # WebBaseLoader Supports direct URL List inputs
             web_loader = WebBaseLoader(WEB_URLS)
             web_docs = web_loader.load()
             
-            # 將網頁抓下來的內容與 PDF 內容合併
+            # Merge webpage content with PDF content
             docs.extend(web_docs)
             print(f"   ✅ Successfully loaded {len(WEB_URLS)} web pages.")
         except Exception as e:
             print(f"   ❌ Error loading web pages: {e}")
-            print("   💡 提示：請確認是否已執行 `pip install beautifulsoup4`")
+            print("   💡 Note: Please confirm that you have executed `pip install beautifulsoup4`.")
 
-    # 檢查是否有抓到任何資料
+    # Check if any data has been captured.
     if not docs:
         print("\n⚠️ No documents found from either PDFs or Web. Exiting.")
         return
@@ -133,7 +133,7 @@ def build_vector_database():
     print(f"\n✅ Total document chunks/pages loaded: {len(docs)}")
 
     # 4. 文本切塊 (Text Chunking)
-    # 這裡的 chunking 會同時對 PDF 與 HTML 解析後的純文字生效
+    # The chunking here will apply to both the plain text parsed from PDF and HTML.
     print("✂️ Splitting text...")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=3500, chunk_overlap=500)
     splits = text_splitter.split_documents(docs)
