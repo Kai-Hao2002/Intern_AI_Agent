@@ -58,7 +58,7 @@ def trigger_remote_build():
         ssh.exec_command(command, timeout=10)
         return "✅ Yocto remote compilation has started in the background. Please use the status check tool to track the progress."
     except Exception as e:
-        return f"❌ 觸發編譯時發生未預期錯誤: {e}"
+        return f"❌ An unexpected error occurred during compilation: {e}"
     finally:
         ssh.close()
 
@@ -167,7 +167,7 @@ def flash_image_uuu():
 if __name__ == "__main__":
     print("="*50)
     print("Launch the Task 2 automated workflow (Cortex-A Yocto deployment)")
-    print(f"當前模式: {EXECUTION_MODE}")
+    print(f"Current Mode: {EXECUTION_MODE}")
     print("="*50)
     
     if trigger_remote_build():

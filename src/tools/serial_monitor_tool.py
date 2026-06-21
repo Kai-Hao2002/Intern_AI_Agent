@@ -28,7 +28,7 @@ def monitor_uart_log(port_name: str, duration: int = 5, max_retries: int = 3):
             break
         except serial.SerialException as e:
             if attempt == max_retries:
-                return False, f"❌ 嚴重錯誤：無法開啟序列埠 {port_name}。已重試 {max_retries} 次皆失敗。錯誤細節：{e}\n🚨 [系統指令]: 請回報使用者檢查硬體連線或 USB 驅動。"
+                return False, f"❌ Critical Error: Unable to open serial port {port_name}. Tried {max_retries} times without success. Error details: {e}\n🚨 [System Command]: Please report to the user to check hardware connections or USB drivers."
             
             print(f"⚠️ Unable to open sequence port, will try again in {2} seconds ({attempt}/{max_retries})...")
             time.sleep(2)
@@ -45,7 +45,7 @@ def monitor_uart_log(port_name: str, duration: int = 5, max_retries: int = 3):
                             error_detected = True
                             
         except serial.SerialException as e:
-            return False, f"❌ 警告：在監聽過程中序列埠突然中斷連線！錯誤細節：{e}"
+            return False, f"❌ Warning: The sequence port suddenly dropped the connection during listening! Error details: {e}"
         finally:
             ser.close()
 
@@ -55,9 +55,9 @@ def monitor_uart_log(port_name: str, duration: int = 5, max_retries: int = 3):
     log_summary = "\n".join(captured_logs)
     
     if error_detected:
-        return False, f"❌ 警告！在 UART 日誌中偵測到系統崩潰或異常：\n{log_summary}"
+        return False, f"❌ Warning! System crash or exception detected in the UART log: \n{log_summary}"
     else:
-        return True, f"✅ 系統運作正常，擷取到的日誌如下：\n{log_summary}"
+        return True, f"✅ The system is operating normally. The retrieved log is as follows: \n{log_summary}"
 
 if __name__ == "__main__":
     test_port = input("Please enter the virtual sequence port path (e.g., /dev/ttys001): ")

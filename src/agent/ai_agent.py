@@ -45,4 +45,4 @@ workflow.add_edge("QA_Expert", "Supervisor")
 # 編譯應用程式 (導出供 main.py 使用)
 mas_app = workflow.compile()
 
-logger.info("LangGraph 拓撲架構編譯完成。")
+logger.info("LangGraph finished")

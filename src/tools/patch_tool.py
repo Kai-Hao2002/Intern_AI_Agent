@@ -17,17 +17,16 @@ def apply_patch_tool(file_path: str, search_text: str, replace_text: str) -> str
     
 
     if not os.path.exists(file_path):
-        return (f"❌ 修復失敗：在本地端找不到檔案 `{file_path}`。\n"
-                f"🚨 [系統指令]: 請不要再嘗試使用 patch_tool 修復此檔案！請直接用文字向使用者說明需要如何修改。")
-    
+        return (f"❌ Repair failed: file `{file_path}` not found on local machine.\n"
+                f"🚨 [System command]: Please do not attempt to repair this file using patch_tool again! Please explain to the user in text how to modify it.")
     # 2. Read the original file content
     with open(file_path, "r", encoding="utf-8") as f:
         original_code = f.read()
 
     # 3. Verify whether search_text actually exists in the code.
     if search_text not in original_code:
-        return (f"❌ 修復失敗：在 {file_path} 中找不到指定的 `search_text`。\n"
-                f"🚨 [系統指令]: 請確保片段完全一致。如果多次失敗，請停止呼叫工具，直接印出建議修改方案。")
+        return (f"❌ Repair failed: The specified `search_text` could not be found in {file_path}.\n"
+                f"🚨 [System Command]: Ensure the fragments are completely identical. If it fails multiple times, stop calling the tool and print out the suggested modifications directly.")
 
     # 4. Perform code replacement
     new_code = original_code.replace(search_text, replace_text)
@@ -57,6 +56,6 @@ def apply_patch_tool(file_path: str, search_text: str, replace_text: str) -> str
     with open(file_path, "w", encoding="utf-8") as f:
         f.write(new_code)
 
-    return (f"✅ 成功修復！已將修改套用至 `{file_path}`。\n"
-            f"📦 已自動生成 BSP 標準補丁檔案：`{patch_filename}`。\n"
-            f"請立即回報主管節點，並請求 DevOps_Expert 重新進行編譯。")
+    return (f"✅ Fixed successfully! Modifications have been applied to `{file_path}`.\n"
+            f"📦 BSP standard patch file automatically generated: `{patch_filename}`.\n"
+            f"Please report to the supervisor node immediately and request DevOps_Expert to recompile.")

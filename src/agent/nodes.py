@@ -30,17 +30,17 @@ zeroshot_agent = create_react_agent(llm, tools=[])
 
 def generate_structured_test_plan(hardware_context: str, user_request: str) -> TestPlanSchema:
     prompt = ChatPromptTemplate.from_messages([
-        ("system", """你是一位精通 NXP i.MX93 的資深嵌入式 QA 自動化工程師。
-        請根據提供的手冊上下文（Context），為指定的硬體周邊生成完整的自動化測試計畫。
+        ("system", """You are a Senior Embedded QA Automation Engineer with deep expertise in the NXP i.MX93 platform.
+        Based on the provided hardware manual context, generate a comprehensive automated test plan for the specified hardware peripheral.
         
-        🚨 【Pytest 框架強制規範】(CRITICAL RULES):
-        1. 測試腳本必須完全符合 `pytest` 框架的標準。
-        2. 所有驗證函式必須以 `test_` 開頭。
-        3. 請依賴 Python 原生的 `assert` 語句進行斷言。
-        4. 絕對不要包含 `if __name__ == "__main__":` 區塊，也不要呼叫 `sys.exit()`。
-        5. 腳本中須包含模擬或真實的暫存器讀寫函式 (如 `mem_read_32`)。
+        🚨 [CRITICAL RULES for Pytest Framework]:
+        1. The test script MUST strictly adhere to the `pytest` framework standards.
+        2. All validation functions MUST start with `test_` (e.g., `def test_lpi2c2_mcfgr0_reset_value():`).
+        3. Rely ONLY on native Python `assert` statements for assertions. Do NOT use `try-except` blocks to catch AssertionErrors, and do NOT manually print PASS/FAIL.
+        4. NEVER include an `if __name__ == "__main__":` block, and NEVER call `sys.exit()`.
+        5. The script must include a simulated or actual register read/write function (e.g., `mem_read_32`) to ensure it runs independently without errors.
         
-        硬體手冊上下文 / Hardware Manual Context:
+        Hardware Manual Context:
         {context}
         """),
         ("human", "{input}")
@@ -54,14 +54,15 @@ def supervisor_node(state: AgentState):
     if current_mode == "B1":
         return {"next_node": "ZeroShot_Expert"}
         
-    system_prompt = f"""你是一位嵌入式系統專案主管。目前運行模式：[{current_mode}]。
-        請遵循以下決策邏輯：
-        1. 若需編譯與部署 -> 指派 DevOps_Expert
-        2. 若需監聽序列埠，【或是要求分析電路圖與生成測試計畫 (Test Plan)】 -> 指派 QA_Expert
-        3. 若遇見錯誤 (編譯錯誤或 Kernel Panic) -> 指派 Knowledge_Expert 查閱手冊並產生 Patch 修復。
-        4. 🚨【反饋迴圈】：如果 Knowledge_Expert 回報「成功修復」，必須再次指派 DevOps_Expert 進行編譯驗證。
-        5. 🛑【人工介入】：如果 Knowledge_Expert 要求人類介入，你必須立刻選擇 FINISH 結束任務。
-        6. 只有當最終日誌顯示一切正常，且不需要人工介入時，才選擇 FINISH。
+    system_prompt = f"""You are an Embedded Systems Project Supervisor. Current execution mode: [{current_mode}].
+        
+        Please follow this decision logic strictly:
+        1. For compilation and deployment tasks -> Route to `DevOps_Expert`.
+        2. For serial port monitoring, OR requests to analyze schematics and generate test plans -> Route to `QA_Expert`.
+        3. Upon encountering errors (e.g., build failures or Kernel Panics) -> Route to `Knowledge_Expert` to consult manuals and generate a patch.
+        4. 🚨 [Feedback Loop]: If `Knowledge_Expert` reports "Patch applied successfully", you MUST route back to `DevOps_Expert` to recompile and verify the fix.
+        5. 🛑 [Human Intervention]: If `Knowledge_Expert` requests human intervention (e.g., "file not found", "please modify manually"), the automated fixing limit has been reached. You MUST immediately select FINISH to end the task. NEVER continue routing to `DevOps_Expert` autonomously.
+        6. Select FINISH ONLY when the final logs show complete success, no human intervention is needed, and all user requests are fulfilled.
         """
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     router_llm = llm.with_structured_output(RouteDecision)
@@ -69,28 +70,28 @@ def supervisor_node(state: AgentState):
     return {"next_node": decision.next_node}
 
 def zeroshot_node(state: AgentState):
-    sys_msg = SystemMessage(content="你是一位常規的嵌入式工程師。請僅依賴預訓練知識回答，不允許呼叫任何工具。請直接給出程式碼修復建議。")
+    sys_msg = SystemMessage(content="You are a standard embedded software engineer. Please answer relying solely on your pre-trained knowledge. You are NOT allowed to call any tools. Provide code fixing suggestions directly.")
     inputs = [sys_msg] + state["messages"]
     result = zeroshot_agent.invoke({"messages": inputs})
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def knowledge_node(state: AgentState):
-    sys_msg = SystemMessage(content="""你是一位 NXP 系統專家。
-    1. 使用 query_nxp_knowledge_base 檢索手冊。
-    2. 若需修復，必須呼叫 `apply_patch_tool` 修改原始碼。
-    3. 如果工具回報「找不到檔案」，絕對不要反覆嘗試，請改為直接在對話中輸出建議。
+    sys_msg = SystemMessage(content="""You are an NXP Systems Expert.
+    1. Use `query_nxp_knowledge_base` to retrieve hardware manuals.
+    2. If a code fix is required, you MUST call `apply_patch_tool` to modify the source code.
+    3. 🛑 [Circuit Breaker]: If the tool reports "File not found" or fails, DO NOT attempt to call the tool repeatedly. Instead, gracefully abort and output your recommended modifications directly in the chat.
     """)
-    baton = HumanMessage(content="[系統] 請查閱手冊庫，分析當前硬體配置或崩潰日誌。若需修復程式碼請嘗試使用工具，工具失敗則直接輸出建議。")
+    baton = HumanMessage(content="[System] Please consult the knowledge base to analyze the hardware configuration or crash logs. Attempt to use the patch tool if code modification is needed; if it fails, output your suggestions directly.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = knowledge_agent.invoke({"messages": inputs})
     return {"messages": result["messages"][len(inputs):]}
 
 def devops_node(state: AgentState):
-    sys_msg = SystemMessage(content="""你負責執行編譯與部署工具。
-    MCU 任務直接呼叫 compile_and_flash_mcu。
-    MPU 任務依序呼叫 start_mpu_build -> check_mpu_build_status -> deploy_mpu_image。
+    sys_msg = SystemMessage(content="""You are responsible for executing build and deployment tools.
+    For MCU tasks: Directly call `compile_and_flash_mcu`.
+    For MPU tasks: Call `start_mpu_build` -> `check_mpu_build_status` -> `deploy_mpu_image` sequentially.
     """)
-    baton = HumanMessage(content="[系統] 輪到 DevOps 專家行動，請立即扣動板機執行編譯/部署工具。")
+    baton = HumanMessage(content="[System] It is the DevOps Expert's turn. Please immediately trigger the build/deployment tools.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = devops_agent.invoke({"messages": inputs})
     return {"messages": result["messages"][len(inputs):]}
@@ -109,14 +110,14 @@ def qa_node(state: AgentState):
                 logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
                 img_base64 = get_image_base64(img_path)
                 vision_prompt = [
-                    SystemMessage(content="你是一位資深硬體工程師。請分析這張 i.MX93 EVK 的電源樹 (PWR TREE) 截圖，提取出畫面中的主要電源管理晶片 (PMIC) 型號。"),
+                    SystemMessage(content="You are a Senior Hardware Engineer. Please analyze this screenshot of the i.MX93 EVK Power Tree (PWR TREE) and extract the exact model name of the main Power Management IC (PMIC) shown in the image."),
                     HumanMessage(content=[
-                        {"type": "text", "text": "請告訴我這張圖上的 PMIC 晶片型號是什麼？"},
+                        {"type": "text", "text": "What is the PMIC chip model shown in this schematic?"},
                         {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
                     ])
                 ]
                 vision_result = llm.invoke(vision_prompt).content
-                vision_context = f"\n[AI Circuit Diagram Visual Analysis Report]\n{vision_result}\n"
+                vision_context = f"\n[AI Visual Schematic Analysis Report]\n{vision_result}\n"
                 if "PCA9451" in vision_result.upper():
                     extracted_chip = "PCA9451A PMIC I2C address and LPI2C2 memory map"
             else:
@@ -126,9 +127,9 @@ def qa_node(state: AgentState):
         rag_context = query_nxp_knowledge_base.invoke(rag_query)
 
         combined_context = (
-            f"實體電路圖分析狀態：\n{vision_context}\n-------------------\n"
-            f"官方手冊與 Pinout MD 檔精確位址：\n{rag_context}\n-------------------\n"
-            f"請撰寫對該 I2C 設備進行 Read/Write 的驗證代碼。"
+            f"Physical Schematic Analysis State:\n{vision_context}\n-------------------\n"
+            f"Official Manual & Pinout Exact Addresses:\n{rag_context}\n-------------------\n"
+            f"Please write validation code to perform Read/Write operations on this I2C device."
         )
         
         structured_plan = generate_structured_test_plan(combined_context, last_message)
@@ -147,10 +148,10 @@ def qa_node(state: AgentState):
                 f.write(case.test_python_script)
             saved_files.append(file_name)
         
-        report_msg = f"📊 [Test plan generated successfully. {len(saved_files)} test scripts have been generated and stored in the `generated_tests` directory.\n{', '.join(saved_files)}"
+        report_msg = f"📊 [Test Plan Generated]\nSuccessfully generated {len(saved_files)} test scripts and saved them in the `generated_tests` directory:\n{', '.join(saved_files)}"
         return {"messages": [AIMessage(content=report_msg)], "next_node": "FINISH"}
     else:
-        sys_msg = SystemMessage(content="你負責序列埠監聽。請立即使用預設埠號呼叫 monitor_device_logs 工具。")
+        sys_msg = SystemMessage(content="You are responsible for serial port monitoring. Please immediately call the `monitor_device_logs` tool using the default port.")
         inputs = [sys_msg] + state["messages"]
         result = qa_agent.invoke({"messages": inputs})
         return {"messages": result["messages"][len(inputs):]}

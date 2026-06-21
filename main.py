@@ -56,7 +56,7 @@ def main():
             if not user_text.strip():
                 continue
                 
-            logger.info(f"收到使用者指令: {user_text}")
+            logger.info(f"Receive user text {user_text}")
             
             initial_state = {
                 "messages": [HumanMessage(content=user_text)],
@@ -73,7 +73,7 @@ def main():
             logger.warning("Upon receiving the interrupt signal (KeyboardInterrupt), the system safely exits.")
             break
         except Exception as e:
-            logger.error(f"系統運行時發生未預期錯誤: {e}", exc_info=True)
+            logger.error(f"An unexpected error occurred during system runtime:{e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
