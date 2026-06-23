@@ -5,7 +5,7 @@ import logging
 from agent.state import AgentState
 from agent.nodes import (
     supervisor_node, zeroshot_node, knowledge_node, 
-    devops_node, qa_node
+    devops_node, qa_node, single_agent_node
 )
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ workflow = StateGraph(AgentState)
 
 workflow.add_node("Supervisor", supervisor_node)
 workflow.add_node("ZeroShot_Expert", zeroshot_node)
+workflow.add_node("SingleAgent_Expert", single_agent_node)
 workflow.add_node("Knowledge_Expert", knowledge_node)
 workflow.add_node("DevOps_Expert", devops_node)
 workflow.add_node("QA_Expert", qa_node)
@@ -29,6 +30,7 @@ workflow.add_conditional_edges(
     lambda state: state["next_node"],
     {
         "ZeroShot_Expert": "ZeroShot_Expert",
+        "SingleAgent_Expert": "SingleAgent_Expert",
         "Knowledge_Expert": "Knowledge_Expert",
         "DevOps_Expert": "DevOps_Expert",
         "QA_Expert": "QA_Expert",
@@ -38,6 +40,7 @@ workflow.add_conditional_edges(
 
 # 非主管節點執行完畢後一律返回 Supervisor 進行狀態更新與重新分配
 workflow.add_edge("ZeroShot_Expert", "Supervisor")
+workflow.add_edge("SingleAgent_Expert", "Supervisor")
 workflow.add_edge("Knowledge_Expert", "Supervisor")
 workflow.add_edge("DevOps_Expert", "Supervisor")
 workflow.add_edge("QA_Expert", "Supervisor")

@@ -26,7 +26,14 @@ llm = get_llm(provider="gemini")
 knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, apply_patch_tool])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
+#B1
 zeroshot_agent = create_react_agent(llm, tools=[]) 
+#B2
+single_agent = create_react_agent(llm, tools=[
+    query_nxp_knowledge_base, apply_patch_tool,
+    compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image,
+    monitor_device_logs
+])
 
 def generate_structured_test_plan(hardware_context: str, user_request: str) -> TestPlanSchema:
     prompt = ChatPromptTemplate.from_messages([
@@ -52,7 +59,11 @@ def generate_structured_test_plan(hardware_context: str, user_request: str) -> T
 def supervisor_node(state: AgentState):
     current_mode = state.get("mode", "PROPOSED_MAS")
     if current_mode == "B1":
+        logger.info("[Supervisor] Experimental mode B1 is activated, with forced guidance to ZeroShot_Expert")
         return {"next_node": "ZeroShot_Expert"}
+    if current_mode == "B2":
+        logger.info("[Supervisor] Experimental mode B2 is activated, with forced guidance to SingleAgent_Expert")
+        return {"next_node": "SingleAgent_Expert"}
         
     system_prompt = f"""You are an Embedded Systems Project Supervisor. Current execution mode: [{current_mode}].
         
@@ -73,6 +84,12 @@ def zeroshot_node(state: AgentState):
     sys_msg = SystemMessage(content="You are a standard embedded software engineer. Please answer relying solely on your pre-trained knowledge. You are NOT allowed to call any tools. Provide code fixing suggestions directly.")
     inputs = [sys_msg] + state["messages"]
     result = zeroshot_agent.invoke({"messages": inputs})
+    return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
+
+def single_agent_node(state: AgentState):
+    sys_msg = SystemMessage(content="You are an all-in-one embedded systems engineer. You have access to ALL tools including knowledge retrieval, code patching, compilation, and UART monitoring. Attempt to solve the user's issue sequentially by yourself.")
+    inputs = [sys_msg] + state["messages"]
+    result = single_agent.invoke({"messages": inputs})
     return {"messages": result["messages"][len(inputs):], "next_node": "FINISH"}
 
 def knowledge_node(state: AgentState):
@@ -97,31 +114,36 @@ def devops_node(state: AgentState):
     return {"messages": result["messages"][len(inputs):]}
 
 def qa_node(state: AgentState):
+    current_mode = state.get("mode", "PROPOSED_MAS")
     last_message = state["messages"][-1].content
     if "測試計畫" in last_message or "test plan" in last_message.lower():
         logger.info("[QA Expert] detects test plan generation requirement, initiating automated pipeline...")
         vision_context = ""
         extracted_chip = "LPI2C" 
         
-        img_match = re.search(r'([a-zA-Z0-9_./\\]+\.(?:png|jpg|jpeg))', last_message, re.IGNORECASE)
-        if img_match:
-            img_path = img_match.group(1)
-            if os.path.exists(img_path):
-                logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
-                img_base64 = get_image_base64(img_path)
-                vision_prompt = [
-                    SystemMessage(content="You are a Senior Hardware Engineer. Please analyze this screenshot of the i.MX93 EVK Power Tree (PWR TREE) and extract the exact model name of the main Power Management IC (PMIC) shown in the image."),
-                    HumanMessage(content=[
-                        {"type": "text", "text": "What is the PMIC chip model shown in this schematic?"},
-                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                    ])
-                ]
-                vision_result = llm.invoke(vision_prompt).content
-                vision_context = f"\n[AI Visual Schematic Analysis Report]\n{vision_result}\n"
-                if "PCA9451" in vision_result.upper():
-                    extracted_chip = "PCA9451A PMIC I2C address and LPI2C2 memory map"
-            else:
-                logger.warning(f"[QA Expert] Image file not found: {img_path}")
+        if current_mode == "B3":
+            logger.warning("[QA Expert] Experiment Group B3 (Text-Only MAS) Startup: Force the multimodal vision module to shut down and ignore physical circuit diagram input.")
+            vision_context = "\n[Mode B3: Text-Only. Vision disabled. Rely strictly on text search.]\n"
+        else:
+            img_match = re.search(r'([a-zA-Z0-9_./\\]+\.(?:png|jpg|jpeg))', last_message, re.IGNORECASE)
+            if img_match:
+                img_path = img_match.group(1)
+                if os.path.exists(img_path):
+                    logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
+                    img_base64 = get_image_base64(img_path)
+                    vision_prompt = [
+                        SystemMessage(content="You are a Senior Hardware Engineer. Please analyze this screenshot of the i.MX93 EVK Power Tree (PWR TREE) and extract the exact model name of the main Power Management IC (PMIC) shown in the image."),
+                        HumanMessage(content=[
+                            {"type": "text", "text": "What is the PMIC chip model shown in this schematic?"},
+                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
+                        ])
+                    ]
+                    vision_result = llm.invoke(vision_prompt).content
+                    vision_context = f"\n[AI Visual Schematic Analysis Report]\n{vision_result}\n"
+                    if "PCA9451" in vision_result.upper():
+                        extracted_chip = "PCA9451A PMIC I2C address and LPI2C2 memory map"
+                else:
+                    logger.warning(f"[QA Expert] Image file not found: {img_path}")
 
         rag_query = f"{extracted_chip} setup in i.MX93 EVK"
         rag_context = query_nxp_knowledge_base.invoke(rag_query)

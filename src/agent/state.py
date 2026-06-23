@@ -23,6 +23,6 @@ class RouteDecision(BaseModel):
     主管節點路由決策的強制結構化輸出
     Forced structured output of routing decisions by the supervisor node
     """
-    next_node: Literal["Knowledge_Expert", "DevOps_Expert", "QA_Expert", "ZeroShot_Expert", "FINISH"] = Field(
+    next_node: Literal["Knowledge_Expert", "DevOps_Expert", "QA_Expert", "ZeroShot_Expert", "SingleAgent_Expert", "FINISH"] = Field(
         description="Determine the next execution node. If the task is complete, send a FINISH response."
     )

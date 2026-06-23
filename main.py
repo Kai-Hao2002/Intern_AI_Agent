@@ -44,7 +44,7 @@ def main():
     print_banner()
     logger.info("The embedded DevOps agent system has been launched.")
     
-    TEST_MODE = "PROPOSED_MAS" 
+    TEST_MODE = "PROPOSED_MAS" # Change to "B1", "B2", "B3" 或 "PROPOSED_MAS"
     
     while True:
         try:
@@ -60,7 +60,8 @@ def main():
             
             initial_state = {
                 "messages": [HumanMessage(content=user_text)],
-                "mode": TEST_MODE
+                "mode": TEST_MODE,
+                "retry_count": 0
             }
 
             for output in mas_app.stream(initial_state, {"recursion_limit": 20}):
