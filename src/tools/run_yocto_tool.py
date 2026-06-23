@@ -37,7 +37,7 @@ def _connect_ssh_with_retry(host, port, username, password, max_retries=3, delay
             
     return None
 
-def trigger_remote_build():
+def trigger_remote_build(target_recipe="imx-image-multimedia"):
     """
     非同步觸發：透過 SSH 在背景啟動 Yocto 編譯
     Asynchronous Triggering: Launching Yocto Compilation in the Background via SSH
@@ -54,7 +54,7 @@ def trigger_remote_build():
         return "❌ Critical Network Error: Unable to connect to the Yocto server; maximum retries reached. \n🚨 [System Command]: Please report to the user to check server status and network configuration."
         
     try:
-        command = f"nohup bitbake imx-image-multimedia > {BUILD_LOG_PATH} 2>&1 &"
+        command = f"nohup bitbake {target_recipe} > {BUILD_LOG_PATH} 2>&1 &"
         ssh.exec_command(command, timeout=10)
         return "✅ Yocto remote compilation has started in the background. Please use the status check tool to track the progress."
     except Exception as e:

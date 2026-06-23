@@ -13,6 +13,10 @@ class AgentState(TypedDict):
     next_node: str
     mode: str          # 核心：控制實驗組 "B1", "B2", "B3", "PROPOSED_MAS"
     retry_count: int   # 記錄除錯迴圈次數
+    iteration_count: int      # 記錄「修改->編譯」的迴圈次數 (對應 k)
+    build_success: bool       # 記錄當前編譯狀態
+    hil_test_passed: bool     # 記錄硬體迴圈 (UART) 測試是否通過
+    total_tokens: int         # 記錄 Token 消耗 (用於計算 E_token)
 
 class RouteDecision(BaseModel):
     """
