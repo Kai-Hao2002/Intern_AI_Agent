@@ -9,5 +9,25 @@
     "target_content": "masterConfig.pinConfig = kLPI2C_4PinUnidirectional;",
     "human_baseline_time_sec": 180,
     "user_prompt": "請幫我編譯 MCU 專案。如果編譯失敗，請查閱 i.MX93 參考手冊，了解該晶片的 LPI2C 腳位模式限制，並修改原始碼 (目標檔案的相對路徑為 target_workspace/mcu_firmware/main.c)，直到編譯成功為止。"
+  },
+  {
+    "bug_id": "BUG_YOCTO_005",
+    "category": "Massive Log & Tool-Dependent",
+    "description": "Yocto 核心配方檔案被意外重新命名，導致依賴遺失 (Yocto core recipe file accidentally renamed, causing missing dependency)",
+    "target_file": "target_workspace/mpu_linux_bsp/recipes-bsp/u-boot/u-boot-imx_2023.04.bb",
+    "fault_action": "rename_file",
+    "target_content": "target_workspace/mpu_linux_bsp/recipes-bsp/u-boot/u-boot-imx_2023.04.bb.bak",
+    "human_baseline_time_sec": 420,
+    "user_prompt": "請幫我觸發 MPU 的遠端 Yocto 建置。如果出現 do_fetch 或 Provider 找不到的錯誤，請分析 Yocto 日誌，找出是哪個 bb 檔案遺失，並在伺服器上修復它。"
+  },
+  {
+    "bug_id": "BUG_DTS_008",
+    "category": "Text-Dependent Bugs",
+    "description": "Device Tree (DTS) 節點未正確閉合導致語法污染 (Unclosed Device Tree (DTS) node causing syntax corruption)",
+    "target_file": "target_workspace/mpu_linux_bsp/arch/arm64/boot/dts/freescale/imx93-11x11-evk.dts",
+    "fault_action": "append_text",
+    "target_content": "&lpi2c2 {\n    status = \"okay\";\n    /* FATAL: Missing closing brace } */",
+    "human_baseline_time_sec": 240,
+    "user_prompt": "請幫我重新編譯 Yocto 專案。若遇到 dtc (Device Tree Compiler) 回報語法錯誤 (Syntax Error)，請定位損壞的 dts 檔案並利用工具將最後一行多餘/錯誤的區塊移除。"
   }
 ]

@@ -4,6 +4,7 @@ import re
 import json
 import time
 import logging
+from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from langchain_core.prompts import ChatPromptTemplate
 from langgraph.prebuilt import create_react_agent
@@ -36,6 +37,15 @@ single_agent = create_react_agent(llm, tools=[
     monitor_device_logs
 ])
 
+class VisionExtractionSchema(BaseModel):
+    """
+    定義視覺模型解析電路圖後的強制輸出格式
+    Defines the mandatory output format after the vision model parses the schematic
+    """
+    chip_model: str = Field(description="萃取出的確切 IC 晶片型號 (例如: PCA9451A, WM8960, LSM6DSOXTR) / The exact IC Part Number extracted")
+    bus_type: str = Field(description="連接的匯流排名稱或介面 (例如: I2C2, I2C1, SPI) / The connected bus name or interface")
+    configuration_pins: str = Field(description="任何可見的硬體配置腳位，若無則填 'None' / Any visible hardware configuration pins, 'None' if not visible")
+
 def generate_structured_test_plan(hardware_context: str, user_request: str) -> TestPlanSchema:
     prompt = ChatPromptTemplate.from_messages([
         ("system", """You are a Senior Embedded QA Automation Engineer with deep expertise in the NXP i.MX93 platform.
@@ -58,16 +68,26 @@ def generate_structured_test_plan(hardware_context: str, user_request: str) -> T
     return chain.invoke({"context": hardware_context, "input": user_request})
 
 def supervisor_node(state: AgentState):
-    # 🎯 新增除錯訊息 1
     print("\n[System] The Supervisor node is starting up and sending a routing request to the LLM. Please wait...") 
     
     current_mode = state.get("mode", "PROPOSED_MAS")
+    iteration_count = state.get("iteration_count", 0) # 取得當前迭代次數 (Get current iteration count)
+    MAX_RETRIES = 5 # 定義最大嘗試修復次數 k (Define maximum repair attempts k)
+    
     if current_mode == "B1":
         return {"next_node": "ZeroShot_Expert"}
     if current_mode == "B2":
         return {"next_node": "SingleAgent_Expert"}
         
+    # 強制邊界防呆機制 (Boundary Guardrail Mechanism)
+    if iteration_count >= MAX_RETRIES:
+        logger.warning(f"[Supervisor] Reached maximum repair retry limit ({MAX_RETRIES}). Forcing task to FINISH to prevent infinite loop.")
+        warning_msg = AIMessage(content=f"🛑 [System Guardrail] The maximum number of automated repair attempts ({MAX_RETRIES}) has been reached. The agent failed to resolve the issue autonomously. Please intervene manually.")
+        # 覆寫狀態並強制結束 (Overwrite state and force finish)
+        return {"next_node": "FINISH", "messages": [warning_msg]}
+        
     system_prompt = f"""You are an Embedded Systems Project Supervisor. Current execution mode: [{current_mode}].
+        🌟 Current repair iteration: {iteration_count}/{MAX_RETRIES}.
         
         Please follow this decision logic strictly:
         1. For compilation and deployment tasks -> Route to `DevOps_Expert`.
@@ -106,9 +126,14 @@ def knowledge_node(state: AgentState):
     inputs = [sys_msg] + state["messages"] + [baton]
     result = knowledge_agent.invoke({"messages": inputs})
     think_time = time.time() - start_think
+    
+    # 每次大腦介入嘗試修復，迭代次數就加 1 (Increment iteration count every time the brain attempts a fix)
+    current_iteration = state.get("iteration_count", 0)
+    
     return {
         "messages": result["messages"][len(inputs):],
-        "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time
+        "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time,
+        "iteration_count": current_iteration + 1  # 更新狀態中的計數器 (Update the counter in the state)
     }
 
 def devops_node(state: AgentState):
@@ -139,25 +164,41 @@ def qa_node(state: AgentState):
                 if os.path.exists(img_path):
                     logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
                     img_base64 = get_image_base64(img_path)
-                    vision_prompt = [
+                    
+                    # 1. 設定結構化視覺提取模型 (Setup structured vision LLM)
+                    structured_vision_llm = llm.with_structured_output(VisionExtractionSchema)
+                    
+                    # 2. 構建視覺提示詞 (Construct vision prompt)
+                    vision_messages = [
                         SystemMessage(content="""You are a Hardware Vision Expert. 
-                                        Analyze the provided schematic. Extract:
-                                        1. The exact IC Part Number (e.g., PCA9451A)
-                                        2. The connected bus name (e.g., I2C2, UART1)
-                                        3. Any visible hardware configuration pins (e.g., BOOT_MODE, I2C address selection pins)
-                                        Output this strictly as structured text."""),
+                                        Analyze the provided schematic. Extract the IC Part Number, bus type, and configuration pins accurately."""),
                         HumanMessage(content=[
-                            {"type": "text", "text": "What is the PMIC chip model shown in this schematic?"},
+                            {"type": "text", "text": "What is the exact chip model and bus connection shown in this schematic?"},
                             {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
                         ])
                     ]
-                    vision_result = llm.invoke(vision_prompt).content
-                    vision_context = f"\n[AI Visual Schematic Analysis Report]\n{vision_result}\n"
-                    if "PCA9451" in vision_result.upper():
-                        extracted_chip = "PCA9451A PMIC I2C address and LPI2C2 memory map"
+                    
+                    # 3. 動態解析與組裝 (Dynamic parsing and assembly)
+                    try:
+                        vision_result = structured_vision_llm.invoke(vision_messages)
+                        vision_context = (
+                            f"\n[AI Visual Schematic Analysis Report]\n"
+                            f"- Extracted Chip Model: {vision_result.chip_model}\n"
+                            f"- Connected Bus: {vision_result.bus_type}\n"
+                            f"- Configuration Pins: {vision_result.configuration_pins}\n"
+                        )
+                        logger.info(f"[QA Expert] Vision parsing succeeded: {vision_result.chip_model} on {vision_result.bus_type}")
+                        
+                        # 動態生成 extracted_chip，消除硬編碼
+                        extracted_chip = f"{vision_result.chip_model} {vision_result.bus_type} device address and memory map"
+                        
+                    except Exception as e:
+                        logger.error(f"[QA Expert] Vision structured parsing failed: {e}")
+                        vision_context = "\n[AI Visual Schematic Analysis Report]\nFailed to extract structured data from schematic.\n"
                 else:
                     logger.warning(f"[QA Expert] Image file not found: {img_path}")
 
+        # 4. 動態查詢 RAG (Dynamic RAG query)
         rag_query = f"{extracted_chip} setup in i.MX93 EVK"
         rag_context = query_nxp_knowledge_base.invoke(rag_query)
 

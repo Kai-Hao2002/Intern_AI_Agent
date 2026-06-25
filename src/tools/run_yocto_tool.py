@@ -2,6 +2,7 @@
 import paramiko
 import socket
 import os
+import re
 import time
 import random
 from dotenv import load_dotenv
@@ -37,6 +38,44 @@ def _connect_ssh_with_retry(host, port, username, password, max_retries=3, delay
             
     return None
 
+def extract_critical_yocto_logs(log_content: str, context_lines: int = 50) -> str:
+    """
+    【日誌截斷器 Log Truncator】
+    使用 Regex 提取 ERROR 和 WARNING 及其上下文，並過濾掉無意義的 NOTE。
+    【Log Truncator】
+    Uses Regex to extract ERROR and WARNING messages and their context, and filters out meaningless NOTE messages.
+    """
+    lines = log_content.splitlines()
+    critical_indices = set()
+    
+    # 尋找關鍵字 (支援 ERROR:, WARNING:, FATAL:, failed)
+    for i, line in enumerate(lines):
+        if re.search(r'^(ERROR|WARNING|FATAL):', line, re.IGNORECASE) or "failed" in line.lower():
+            # 抓取該行前後文 (例如前後 50 行)
+            start = max(0, i - context_lines)
+            end = min(len(lines), i + context_lines + 1)
+            critical_indices.update(range(start, end))
+            
+    if not critical_indices:
+        # 如果沒找到明顯錯誤，回傳最後 50 行即可
+        return "\n".join(lines[-50:])
+        
+    sorted_indices = sorted(list(critical_indices))
+    filtered_lines = []
+    
+    # 進行過濾
+    for idx in sorted_indices:
+        line = lines[idx]
+        # 濾除正常的 NOTE 與海量的 gcc 編譯輸出雜訊
+        if not line.startswith("NOTE:") and "gcc" not in line:
+            filtered_lines.append(line)
+            
+    # 如果過濾後依然很長，加強截斷以保護 Token
+    truncated_log = "\n...\n".join(filtered_lines)
+    if len(truncated_log) > 10000:
+        return truncated_log[:10000] + "\n... [Log Truncated due to size limits] ..."
+    return truncated_log
+
 def trigger_remote_build(target_recipe="imx-image-multimedia"):
     """
     非同步觸發：透過 SSH 在背景啟動 Yocto 編譯
@@ -65,36 +104,35 @@ def trigger_remote_build(target_recipe="imx-image-multimedia"):
 def check_build_status():
     """狀態輪詢：檢查背景編譯任務的最新日誌/Status polling: Check the latest logs of background compilation tasks."""
     if EXECUTION_MODE == "MOCK":
-        # 模擬 20% 機率發生網路斷線導致 do_fetch 失敗 
-        # (Simulate a 20% chance of a network disconnection causing do_fetch to fail)
         if random.random() < 0.2:
             return (
                 "❌ Compilation failed! Last log:\n"
                 "ERROR: Task (do_fetch) failed: Fetcher failure: Unable to fetch URL from any source.\n"
-                "ERROR: Logfile of failure stored in: /var/tmp/work/imx93-poky-linux/imx-image/1.0-r0/temp/log.do_fetch\n"
                 "Recommendation: Please check your network connection or Yocto source mirror settings."
             )
         else:
             return "✅ 編譯成功！最後日誌：\nMock Build successful. Image generated at /root/Image-imx93.bin\n(請執行下載與燒錄步驟)"
         
     ssh = _connect_ssh_with_retry(SSH_HOST, SSH_PORT, SSH_USER, SSH_PASS)
-    
     if not ssh:
         return "❌ Critical network error: Unable to connect to the Yocto server to obtain status."
         
     try:
-        stdin, stdout, stderr = ssh.exec_command(f"tail -n 10 {BUILD_LOG_PATH}", timeout=10)
-        log_output = stdout.read().decode('utf-8').strip()
+        stdin, stdout, stderr = ssh.exec_command(f"tail -n 5000 {BUILD_LOG_PATH}", timeout=15)
+        raw_log_output = stdout.read().decode('utf-8', errors='ignore').strip()
         
-        if not log_output:
+        if not raw_log_output:
             return "⏳ The compilation system is initializing; no logs have been generated yet..."
             
-        if "Build successful" in log_output:
-            return f"✅ Compilation successful! Last log: \n{log_output}\n(Please proceed with the download and burning steps)"
-        elif "Failed" in log_output or "Error" in log_output:
-            return f"❌ Compilation failed! Last log: \n{log_output}"
+        if "Build successful" in raw_log_output:
+            return "✅ Compilation successful! Image generated.\n(Please proceed with the deployment steps)"
+        elif "Failed" in raw_log_output or "ERROR:" in raw_log_output:
+            # 呼叫日誌截斷器，萃取精華錯誤片段
+            smart_log = extract_critical_yocto_logs(raw_log_output, context_lines=40)
+            return f"❌ Compilation failed! Filtered Critical Logs:\n{smart_log}"
         else:
-            return f"⏳ Compiling...current progress: \n{log_output}"
+            # 編譯進行中，回傳最後 5 行讓 Supervisor 知道還活著即可
+            return f"⏳ Compiling... current progress:\n" + "\n".join(raw_log_output.splitlines()[-5:])
             
     except socket.timeout:
         return "❌ Log read timeout. The server may be overloaded. Please try again later."
