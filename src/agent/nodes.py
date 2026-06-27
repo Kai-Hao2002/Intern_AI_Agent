@@ -19,13 +19,14 @@ from agent.agent_tools import (
 )
 # 引入 RAG 與 Patch 工具
 from tools.rag_tool import query_nxp_knowledge_base 
-from tools.patch_tool import apply_patch_tool, read_file_tool
+from tools.patch_tool import apply_patch_tool, read_file_tool, execute_bash_command
 
 logger = logging.getLogger(__name__)
 
 # 初始化全域 LLM 與 Agent
 llm = get_llm(provider="gemini")
-knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base, read_file_tool, apply_patch_tool])
+knowledge_agent = create_react_agent(llm, tools=[query_nxp_knowledge_base]) # 只保留檢索工具
+patch_agent = create_react_agent(llm, tools=[read_file_tool, apply_patch_tool, execute_bash_command])
 devops_agent = create_react_agent(llm, tools=[compile_and_flash_mcu, start_mpu_build, check_mpu_build_status, deploy_mpu_image])
 qa_agent = create_react_agent(llm, tools=[monitor_device_logs])
 # B1: Zero-shot LLM, no tools.
@@ -49,6 +50,14 @@ class VisionExtractionSchema(BaseModel):
     chip_model: str = Field(description="萃取出的確切 IC 晶片型號 (例如: PCA9451A, WM8960, LSM6DSOXTR) / The exact IC Part Number extracted")
     bus_type: str = Field(description="連接的匯流排名稱或介面 (例如: I2C2, I2C1, SPI) / The connected bus name or interface")
     configuration_pins: str = Field(description="任何可見的硬體配置腳位，若無則填 'None' / Any visible hardware configuration pins, 'None' if not visible")
+
+def extract_text(content) -> str:
+    """安全地從 LangChain Message 中提取純文字"""
+    if isinstance(content, str):
+        return content
+    elif isinstance(content, list):
+        return " ".join(str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in content)
+    return str(content)
 
 def generate_structured_test_plan(hardware_context: str, user_request: str) -> TestPlanSchema:
     prompt = ChatPromptTemplate.from_messages([
@@ -103,11 +112,12 @@ def supervisor_node(state: AgentState):
         AnalyzeFailure -> RetrieveKnowledge -> GeneratePatch -> ApplyPatch -> Build -> Deploy/MockDeploy -> ObserveRuntime -> StopOrRetry.
         
         Please follow this decision logic strictly:
-        1. If the latest evidence is a build failure, runtime crash, or missing BSP context, route to `Knowledge_Expert`.
-        2. If a patch was applied or the user asks to build/deploy, route to `DevOps_Expert`.
-        3. If compilation/deployment succeeded and runtime validation is requested, route to `QA_Expert`.
-        4. If `QA_Expert` reports Kernel Panic, HardFault, timeout, missing expected UART signature, or any crash pattern, route back to `Knowledge_Expert`.
-        5. Select FINISH only when the latest evidence indicates build success and runtime success, or when human intervention is required.
+        1. 🚨 MANDATORY: If the latest message indicates a BUILD FAILURE (e.g., "ERROR:", "failed", "unsupported"), you MUST route to `Knowledge_Expert` for analysis. DO NOT route to FINISH.
+        2. If Knowledge Expert has provided analysis/retrieval results and a code fix is needed, route to `Patch_Expert`.
+        3. If a patch was successfully applied or the user asks to build/deploy, route to `DevOps_Expert`.
+        4. If compilation/deployment succeeded and runtime validation is requested, route to `QA_Expert`.
+        5. If `QA_Expert` reports Kernel Panic, HardFault, timeout, missing expected UART signature, or any crash pattern, route back to `Knowledge_Expert`.
+        6. Select FINISH ONLY when BOTH build and runtime validation have explicitly PASSED.
         """
     messages = [SystemMessage(content=system_prompt)] + state["messages"]
     router_llm = llm.with_structured_output(RouteDecision)
@@ -139,24 +149,42 @@ def closed_loop_single_agent_node(state: AgentState):
 def knowledge_node(state: AgentState):
     start_think = time.time()
     sys_msg = SystemMessage(content="""You are the Knowledge Expert for an embedded BSP closed-loop repair system.
-    Your responsibilities correspond to AnalyzeFailure, RetrieveKnowledge, GeneratePatch, and ApplyPatch.
+    Your responsibilities correspond to AnalyzeFailure and RetrieveKnowledge.
     1. Use `query_nxp_knowledge_base` to retrieve BSP manuals, source-code context, build documentation, or hardware notes.
-    2. Before fixing code, use `read_file_tool` to read the exact current content of the broken file. Do not guess the code structure.
-    3. Use `apply_patch_tool` for C source files, Device Tree files, linker scripts, or build configuration files.
-    4. If evidence is insufficient or the target file is missing, clearly request human intervention instead of inventing a repair.
+    2. Analyze the root cause based on the error log and retrieved documents.
+    3. Summarize your findings and explicitly state what needs to be fixed so the Patch Expert can take over. Do NOT attempt to read or modify files yourself.
     """)
-    baton = HumanMessage(content="[System] Analyze the latest build/runtime evidence, retrieve relevant BSP context, and apply a minimal patch if a repair is justified.")
+    baton = HumanMessage(content="[System] Analyze the latest build/runtime evidence, retrieve relevant BSP context, and summarize findings for the Patch Expert.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = knowledge_agent.invoke({"messages": inputs})
     think_time = time.time() - start_think
     
-    # 每次大腦介入嘗試修復，迭代次數就加 1 (Increment iteration count every time the brain attempts a fix)
     current_iteration = state.get("iteration_count", 0)
     
     return {
         "messages": result["messages"][len(inputs):],
         "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time,
-        "iteration_count": current_iteration + 1,
+        "iteration_count": current_iteration + 1, 
+        "current_stage": "RetrieveKnowledge",
+    }
+
+def patch_node(state: AgentState):
+    start_think = time.time()
+    sys_msg = SystemMessage(content="""You are the Patch Expert for an embedded BSP closed-loop repair system.
+    1. Read the analysis from Knowledge Expert.
+    2. For CODE edits: Use `read_file_tool` then `apply_patch_tool`.
+    3. For MISSING/RENAMED files: Use `execute_bash_command` to search for backups (e.g., `find target_workspace -name "*.bak"`) and restore them (e.g., `mv <source> <dest>`).
+    4. The project root is typically `target_workspace/`. If you don't know the exact path, use `find` to search for it before applying patches or moving files!
+    5. Confirm success and stop.
+    """)
+    baton = HumanMessage(content="[System] It is the Patch Expert's turn. Please read the target file and apply the necessary fix based on the previous analysis.")
+    inputs = [sys_msg] + state["messages"] + [baton]
+    result = patch_agent.invoke({"messages": inputs})
+    think_time = time.time() - start_think
+    
+    return {
+        "messages": result["messages"][len(inputs):],
+        "llm_thinking_time": state.get("llm_thinking_time", 0) + think_time,
         "current_stage": "ApplyPatch",
     }
 
@@ -164,12 +192,17 @@ def devops_node(state: AgentState):
     sys_msg = SystemMessage(content="""You are the DevOps Expert for the Build and Deploy/MockDeploy stages.
     For MCU tasks: Directly call `compile_and_flash_mcu`.
     For MPU tasks: Call `start_mpu_build` -> `check_mpu_build_status` -> `deploy_mpu_image` sequentially.
+    
+    🚨 CRITICAL RULES:
+    1. Do NOT analyze the build errors or suggest fixes to the user.
+    2. Do NOT ask for human intervention.
+    3. If a build fails, simply output the EXACT error log returned by the tool, state that the build failed, and STOP. The Supervisor will route it to the Knowledge Expert.
     """)
     baton = HumanMessage(content="[System] It is the DevOps Expert's turn. Please immediately trigger the build/deployment tools.")
     inputs = [sys_msg] + state["messages"] + [baton]
     result = devops_agent.invoke({"messages": inputs})
     new_messages = result["messages"][len(inputs):]
-    joined = "\n".join(getattr(msg, "content", "") for msg in new_messages)
+    joined = "\n".join(extract_text(getattr(msg, "content", "")) for msg in new_messages)
     build_passed = "success" in joined.lower() or "成功" in joined
     return {
         "messages": new_messages,
@@ -178,95 +211,102 @@ def devops_node(state: AgentState):
     }
 
 def qa_node(state: AgentState):
+    start_think = time.time()
+    sys_msg = SystemMessage(content="""You are the QA Expert for the ObserveRuntime stage.
+    Monitor UART or mock UART logs, report whether expected success signatures appear, and flag crash patterns such as Kernel Panic, HardFault, timeout, or peripheral initialization failure.""")
+    
+    baton = HumanMessage(content="[System] QA Expert, please monitor the UART logs and verify if the system is operating normally without crashes.")
+    inputs = [sys_msg] + state["messages"] + [baton]
+    result = qa_agent.invoke({"messages": inputs})
+    
+    new_messages = result["messages"][len(inputs):]
+    joined = "\n".join(extract_text(getattr(msg, "content", "")) for msg in new_messages)
+    functional_passed = "operating normally" in joined.lower() or "正常" in joined or "✅" in joined
+
+    return {
+        "messages": new_messages,
+        "llm_thinking_time": state.get("llm_thinking_time", 0) + (time.time() - start_think),
+        "current_stage": "ObserveRuntime",
+        "functional_passed": functional_passed,
+    }
+
+def testplan_node(state: AgentState):
     current_mode = state.get("mode", "PROPOSED_MAS")
-    last_message = state["messages"][-1].content
-    if "測試計畫" in last_message or "test plan" in last_message.lower():
-        logger.info("[QA Expert] detects test plan generation requirement, initiating automated pipeline...")
-        vision_context = ""
-        extracted_chip = "LPI2C" 
+    last_message = extract_text(state["messages"][-1].content)
+    logger.info("[TestPlan Expert] Initiating automated test plan generation pipeline...")
+    
+    vision_context = ""
+    extracted_chip = "LPI2C"
         
-        if current_mode == "B3":
-            logger.warning("[QA Expert] Experiment Group B3 (Text-Only MAS) Startup: Force the multimodal vision module to shut down and ignore physical circuit diagram input.")
-            vision_context = "\n[Mode B3: Text-Only. Vision disabled. Rely strictly on text search.]\n"
-        else:
-            img_match = re.search(r'([a-zA-Z0-9_./\\]+\.(?:png|jpg|jpeg))', last_message, re.IGNORECASE)
-            if img_match:
-                img_path = img_match.group(1)
-                if os.path.exists(img_path):
-                    logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
-                    img_base64 = get_image_base64(img_path)
-                    
-                    # 1. 設定結構化視覺提取模型 (Setup structured vision LLM)
-                    structured_vision_llm = llm.with_structured_output(VisionExtractionSchema)
-                    
-                    # 2. 構建視覺提示詞 (Construct vision prompt)
-                    vision_messages = [
-                        SystemMessage(content="""You are a Hardware Vision Expert. 
-                                        Analyze the provided schematic. Extract the IC Part Number, bus type, and configuration pins accurately."""),
-                        HumanMessage(content=[
-                            {"type": "text", "text": "What is the exact chip model and bus connection shown in this schematic?"},
-                            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
-                        ])
-                    ]
-                    
-                    # 3. 動態解析與組裝 (Dynamic parsing and assembly)
-                    try:
-                        vision_result = structured_vision_llm.invoke(vision_messages)
-                        vision_context = (
-                            f"\n[AI Visual Schematic Analysis Report]\n"
-                            f"- Extracted Chip Model: {vision_result.chip_model}\n"
-                            f"- Connected Bus: {vision_result.bus_type}\n"
-                            f"- Configuration Pins: {vision_result.configuration_pins}\n"
-                        )
-                        logger.info(f"[QA Expert] Vision parsing succeeded: {vision_result.chip_model} on {vision_result.bus_type}")
-                        
-                        # 動態生成 extracted_chip，消除硬編碼
-                        extracted_chip = f"{vision_result.chip_model} {vision_result.bus_type} device address and memory map"
-                        
-                    except Exception as e:
-                        logger.error(f"[QA Expert] Vision structured parsing failed: {e}")
-                        vision_context = "\n[AI Visual Schematic Analysis Report]\nFailed to extract structured data from schematic.\n"
-                else:
-                    logger.warning(f"[QA Expert] Image file not found: {img_path}")
-
-        # 4. 動態查詢 RAG (Dynamic RAG query)
-        rag_query = f"{extracted_chip} setup in i.MX93 EVK"
-        rag_context = query_nxp_knowledge_base.invoke(rag_query)
-
-        combined_context = (
-            f"Physical Schematic Analysis State:\n{vision_context}\n-------------------\n"
-            f"Official Manual & Pinout Exact Addresses:\n{rag_context}\n-------------------\n"
-            f"Please write validation code to perform Read/Write operations on this I2C device."
-        )
-        
-        structured_plan = generate_structured_test_plan(combined_context, last_message)
-        
-        output_dir = os.path.join(os.path.dirname(__file__), "..", "..", "generated_tests")
-        os.makedirs(output_dir, exist_ok=True)
-        saved_files = []
-        for case in structured_plan.test_cases:
-            safe_name = case.test_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
-            file_name = f"test_{safe_name}.py"
-            file_path = os.path.join(output_dir, file_name)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(f"# Plan: {structured_plan.plan_title}\n")
-                f.write(f"# Target Architecture: {structured_plan.target_architecture}\n")
-                f.write(f"# Target Register/Device: {case.target_register} ({case.register_address})\n\n")
-                f.write(case.test_python_script)
-            saved_files.append(file_name)
-        
-        report_msg = f"📊 [Test Plan Generated]\nSuccessfully generated {len(saved_files)} test scripts and saved them in the `generated_tests` directory:\n{', '.join(saved_files)}"
-        return {"messages": [AIMessage(content=report_msg)], "next_node": "FINISH"}
+    if current_mode == "B3":
+        logger.warning("[QA Expert] Experiment Group B3 (Text-Only MAS) Startup: Force the multimodal vision module to shut down and ignore physical circuit diagram input.")
+        vision_context = "\n[Mode B3: Text-Only. Vision disabled. Rely strictly on text search.]\n"
     else:
-        sys_msg = SystemMessage(content="""You are the QA Expert for the ObserveRuntime stage.
-        Monitor UART or mock UART logs, report whether expected success signatures appear, and flag crash patterns such as Kernel Panic, HardFault, timeout, or peripheral initialization failure.""")
-        inputs = [sys_msg] + state["messages"]
-        result = qa_agent.invoke({"messages": inputs})
-        new_messages = result["messages"][len(inputs):]
-        joined = "\n".join(getattr(msg, "content", "") for msg in new_messages)
-        functional_passed = "operating normally" in joined.lower() or "正常" in joined or "✅" in joined
-        return {
-            "messages": new_messages,
-            "current_stage": "ObserveRuntime",
-            "functional_passed": functional_passed,
-        }
+        img_match = re.search(r'([a-zA-Z0-9_./\\]+\.(?:png|jpg|jpeg))', last_message, re.IGNORECASE)
+        if img_match:
+            img_path = img_match.group(1)
+            if os.path.exists(img_path):
+                logger.info(f"[QA Expert] Successfully loaded physical circuit diagram: {img_path}")
+                img_base64 = get_image_base64(img_path)
+                    
+                # 1. 設定結構化視覺提取模型 (Setup structured vision LLM)
+                structured_vision_llm = llm.with_structured_output(VisionExtractionSchema)
+                    
+                # 2. 構建視覺提示詞 (Construct vision prompt)
+                vision_messages = [
+                    SystemMessage(content="""You are a Hardware Vision Expert. 
+                                        Analyze the provided schematic. Extract the IC Part Number, bus type, and configuration pins accurately."""),
+                    HumanMessage(content=[
+                        {"type": "text", "text": "What is the exact chip model and bus connection shown in this schematic?"},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{img_base64}"}}
+                    ])
+                ]
+                    
+                # 3. 動態解析與組裝 (Dynamic parsing and assembly)
+                try:
+                    vision_result = structured_vision_llm.invoke(vision_messages)
+                    vision_context = (
+                        f"\n[AI Visual Schematic Analysis Report]\n"
+                        f"- Extracted Chip Model: {vision_result.chip_model}\n"
+                        f"- Connected Bus: {vision_result.bus_type}\n"
+                        f"- Configuration Pins: {vision_result.configuration_pins}\n"
+                    )
+                    logger.info(f"[QA Expert] Vision parsing succeeded: {vision_result.chip_model} on {vision_result.bus_type}")
+                        
+                    # 動態生成 extracted_chip，消除硬編碼
+                    extracted_chip = f"{vision_result.chip_model} {vision_result.bus_type} device address and memory map"
+                        
+                except Exception as e:
+                    logger.error(f"[QA Expert] Vision structured parsing failed: {e}")
+                    vision_context = "\n[AI Visual Schematic Analysis Report]\nFailed to extract structured data from schematic.\n"
+            else:
+                logger.warning(f"[QA Expert] Image file not found: {img_path}")
+
+    # 4. 動態查詢 RAG (Dynamic RAG query)
+    rag_query = f"{extracted_chip} setup in i.MX93 EVK"
+    rag_context = query_nxp_knowledge_base.invoke(rag_query)
+
+    combined_context = (
+        f"Physical Schematic Analysis State:\n{vision_context}\n-------------------\n"
+        f"Official Manual & Pinout Exact Addresses:\n{rag_context}\n-------------------\n"
+        f"Please write validation code to perform Read/Write operations on this I2C device."
+    )
+        
+    structured_plan = generate_structured_test_plan(combined_context, last_message)
+        
+    output_dir = os.path.join(os.path.dirname(__file__), "..", "..", "generated_tests")
+    os.makedirs(output_dir, exist_ok=True)
+    saved_files = []
+    for case in structured_plan.test_cases:
+        safe_name = case.test_name.replace(" ", "_").replace("/", "_").replace("\\", "_")
+        file_name = f"test_{safe_name}.py"
+        file_path = os.path.join(output_dir, file_name)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(f"# Plan: {structured_plan.plan_title}\n")
+            f.write(f"# Target Architecture: {structured_plan.target_architecture}\n")
+            f.write(f"# Target Register/Device: {case.target_register} ({case.register_address})\n\n")
+            f.write(case.test_python_script)
+        saved_files.append(file_name)
+        
+    report_msg = f"📊 [Test Plan Generated]\nSuccessfully generated {len(saved_files)} test scripts and saved them in the `generated_tests` directory:\n{', '.join(saved_files)}"
+    return {"messages": [AIMessage(content=report_msg)], "next_node": "FINISH"}

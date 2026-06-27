@@ -4,8 +4,8 @@ import logging
 
 from agent.state import AgentState
 from agent.nodes import (
-    supervisor_node, zeroshot_node, knowledge_node, 
-    devops_node, qa_node, single_agent_node,
+    supervisor_node, zeroshot_node, knowledge_node, patch_node,
+    devops_node, qa_node, testplan_node, single_agent_node,
     closed_loop_single_agent_node
 )
 
@@ -21,8 +21,10 @@ workflow.add_node("ZeroShot_Expert", zeroshot_node)
 workflow.add_node("RetrievalOnly_Expert", single_agent_node)
 workflow.add_node("ClosedLoopSingleAgent_Expert", closed_loop_single_agent_node)
 workflow.add_node("Knowledge_Expert", knowledge_node)
+workflow.add_node("Patch_Expert", patch_node)
 workflow.add_node("DevOps_Expert", devops_node)
 workflow.add_node("QA_Expert", qa_node)
+workflow.add_node("TestPlan_Expert", testplan_node)
 
 workflow.set_entry_point("Supervisor")
 
@@ -35,8 +37,10 @@ workflow.add_conditional_edges(
         "RetrievalOnly_Expert": "RetrievalOnly_Expert",
         "ClosedLoopSingleAgent_Expert": "ClosedLoopSingleAgent_Expert",
         "Knowledge_Expert": "Knowledge_Expert",
+        "Patch_Expert": "Patch_Expert",
         "DevOps_Expert": "DevOps_Expert",
         "QA_Expert": "QA_Expert",
+        "TestPlan_Expert": "TestPlan_Expert",
         "FINISH": END
     }
 )
@@ -46,8 +50,10 @@ workflow.add_edge("ZeroShot_Expert", "Supervisor")
 workflow.add_edge("RetrievalOnly_Expert", "Supervisor")
 workflow.add_edge("ClosedLoopSingleAgent_Expert", "Supervisor")
 workflow.add_edge("Knowledge_Expert", "Supervisor")
+workflow.add_edge("Patch_Expert", "Supervisor")
 workflow.add_edge("DevOps_Expert", "Supervisor")
 workflow.add_edge("QA_Expert", "Supervisor")
+workflow.add_edge("TestPlan_Expert", "Supervisor")
 
 # 編譯應用程式 (導出供 main.py 使用)
 mas_app = workflow.compile()

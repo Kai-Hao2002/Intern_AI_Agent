@@ -5,15 +5,18 @@ import sys
 import random
 
 def get_random_scenario():
-    """隨機決定這次開機要發生什麼狀況 (Randomly decide what happens during this boot)"""
-    scenarios = [
-        "NORMAL_PANIC",    # 傳統的 Kernel Panic
-        "BAUDRATE_ERROR",  # 亂碼 (Baud rate 設錯)
-        "TIMEOUT",         # 開機沒反應 (卡死)
-        "HARD_FAULT"       # Cortex-M33 崩潰
-    ]
-    # 增加 NORMAL_PANIC 的機率方便你平時測試 (Increase NORMAL_PANIC probability for normal testing)
-    return random.choices(scenarios, weights=[40, 20, 20, 20])[0]
+    """決定這次開機要發生什麼狀況 (目前已強制設為成功)"""
+    # 🔴 原本的隨機邏輯已註解掉，未來想測試錯誤時可以解除註解
+    # scenarios = [
+    #     "NORMAL_PANIC",    # 傳統的 Kernel Panic
+    #     "BAUDRATE_ERROR",  # 亂碼 (Baud rate 設錯)
+    #     "TIMEOUT",         # 開機沒反應 (卡死)
+    #     "HARD_FAULT"       # Cortex-M33 崩潰
+    # ]
+    # return random.choices(scenarios, weights=[40, 20, 20, 20])[0]
+
+    # 🟢 強制回傳正常成功開機的情境
+    return "NORMAL"
 
 def start_virtual_board():
     master, slave = pty.openpty()
@@ -24,14 +27,28 @@ def start_virtual_board():
     print("="*50)
     print("🔥 [Mock Board] i.MX93 虛擬開發板已準備就緒！")
     print(f"🔌 請將 AI Agent (pyserial) 連接到這個虛擬序列埠: {slave_name}")
-    print(f"🎲 本次隨機模擬情境 (Current Scenario): {scenario}")
+    print(f"🎲 本次模擬情境 (Current Scenario): {scenario}")
     print("="*50)
     
     input("\n👉 請在第二個終端機啟動監聽腳本後，回到這裡按 [Enter] 鍵模擬開發板上電開機...")
     print("\n[開發板開機中... 持續輸出 UART Log...]")
 
     try:
-        if scenario == "TIMEOUT":
+        if scenario == "NORMAL":
+            # 🟢 新增：完美的成功開機日誌 (包含 QA Expert 需要的關鍵字)
+            logs = [
+                "Cortex-M33 Booting...\n",
+                "LPI2C2 Initialized\n",
+                "MCU Booting...\n",
+                "[0.000000] Booting Linux on physical CPU 0x0000000000\n",
+                "[2.145321] Freeing unused kernel memory: 2048K\n",
+                "System is operating normally. ✅\n"
+            ]
+            for line in logs:
+                os.write(master, line.encode('utf-8'))
+                time.sleep(0.2)
+
+        elif scenario == "TIMEOUT":
             # 模擬硬體死機，什麼都不吐 (Simulate hardware freeze, outputting nothing)
             time.sleep(10)
             
@@ -57,7 +74,8 @@ def start_virtual_board():
                 os.write(master, line.encode('utf-8'))
                 time.sleep(0.2)
 
-        else: # NORMAL_PANIC
+        elif scenario == "NORMAL_PANIC":
+            # 傳統的 Kernel Panic
             logs = [
                 "U-Boot 2023.04-imx_v2023.04_2.1.0+g0000000000 for NXP i.MX93 EVK\n",
                 "Starting kernel ...\n",

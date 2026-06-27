@@ -104,14 +104,31 @@ def trigger_remote_build(target_recipe="imx-image-multimedia"):
 def check_build_status():
     """狀態輪詢：檢查背景編譯任務的最新日誌/Status polling: Check the latest logs of background compilation tasks."""
     if EXECUTION_MODE == "MOCK":
-        if random.random() < 0.2:
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+        uboot_recipe = os.path.join(project_root, "target_workspace", "mpu_linux_bsp", "recipes-bsp", "u-boot", "u-boot-imx_2023.04.bb")
+        if not os.path.exists(uboot_recipe):
             return (
-                "❌ Compilation failed! Last log:\n"
-                "ERROR: Task (do_fetch) failed: Fetcher failure: Unable to fetch URL from any source.\n"
-                "Recommendation: Please check your network connection or Yocto source mirror settings."
+                "❌ Compilation failed! Filtered Critical Logs:\n"
+                "ERROR: Nothing PROVIDES 'u-boot-imx' (but /path/to/imx-image-multimedia.bb DEPENDS on or otherwise requires it)\n"
+                "ERROR: Required build target 'imx-image-multimedia' has no buildable providers.\n"
+                "Missing or unbuildable dependency chain was: ['imx-image-multimedia', 'u-boot-imx']"
             )
-        else:
-            return "✅ 編譯成功！最後日誌：\nMock Build successful. Image generated at /root/Image-imx93.bin\n(請執行下載與燒錄步驟)"
+
+
+        dts_file = os.path.join(project_root, "target_workspace", "mpu_linux_bsp", "arch", "arm64", "boot", "dts", "freescale", "imx93-11x11-evk.dts")
+        if os.path.exists(dts_file):
+            with open(dts_file, "r", encoding="utf-8") as f:
+                content = f.read()
+                if "/* FATAL: Missing closing brace } */" in content:
+                    return (
+                        "❌ Compilation failed! Filtered Critical Logs:\n"
+                        "ERROR: Task do_compile failed with exit code '1'\n"
+                        "FATAL ERROR: Syntax error parsing input tree\n"
+                        "target_workspace/mpu_linux_bsp/arch/arm64/boot/dts/freescale/imx93-11x11-evk.dts: syntax error"
+                    )
+                
+        return "✅ 編譯成功！最後日誌：\nMock Build successful. Image generated at /root/Image-imx93.bin\n(請執行下載與燒錄步驟)"
         
     ssh = _connect_ssh_with_retry(SSH_HOST, SSH_PORT, SSH_USER, SSH_PASS)
     if not ssh:

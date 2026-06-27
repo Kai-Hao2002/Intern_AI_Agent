@@ -100,6 +100,16 @@ def monitor_device_logs(port_name: str = "") -> str:
     用於監聽實體或虛擬開發板的 UART 序列埠開機日誌。
     Used to monitor the boot logs of the UART serial port on a physical or virtual development board.
     """
-    selected_port = port_name or os.getenv("TARGET_SERIAL_PORT", "/dev/ttys000")
+    # 讀取 .env 中的設定，若無則預設為 /dev/ttys000
+    # Read the setting from .env, default to /dev/ttys000 if not found
+    env_port = os.getenv("TARGET_SERIAL_PORT", "/dev/ttys000")
+    
+    # 防呆機制：強制覆寫 LLM 傳入的埠號 (防止幻想)
+    # Guardrail: Force override the port number passed by the LLM (to prevent hallucinations)
+    if port_name and port_name != env_port:
+        print(f"\n🔧 [Tool Guardrail] Intercepted AI hallucinated port '{port_name}'. Forcing connection to system target: {env_port}")
+    
+    selected_port = env_port
+    
     success, report = monitor_uart_log(selected_port, duration=8)
     return report

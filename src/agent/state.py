@@ -46,8 +46,10 @@ class RouteDecision(BaseModel):
     """
     next_node: Literal[
         "Knowledge_Expert",
+        "Patch_Expert",
         "DevOps_Expert",
         "QA_Expert",
+        "TestPlan_Expert",
         "ZeroShot_Expert",
         "RetrievalOnly_Expert",
         "ClosedLoopSingleAgent_Expert",

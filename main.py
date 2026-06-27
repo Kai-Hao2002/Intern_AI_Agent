@@ -75,12 +75,16 @@ def main():
                 "crash_patterns": ["Kernel panic", "HardFault", "Segmentation fault"]
             }
 
-            for output in mas_app.stream(initial_state, {"recursion_limit": 20}):
+            for output in mas_app.stream(initial_state, {"recursion_limit": 100}):
                 for node_name, state_update in output.items():
                     logger.info(f"--- 🔄 [Node] {node_name} executes finished ---")
                     if "messages" in state_update and state_update["messages"]:
-                        print(f"\n🤖 {node_name} reports:\n{state_update['messages'][-1].content}\n")
-                        
+                        raw_content = state_update['messages'][-1].content
+                        if isinstance(raw_content, list):
+                            safe_content = " ".join(str(c.get("text", c)) if isinstance(c, dict) else str(c) for c in raw_content)
+                        else:
+                            safe_content = str(raw_content)
+                        print(f"\n🤖 {node_name} reports:\n{safe_content}\n")
         except KeyboardInterrupt:
             logger.warning("Upon receiving the interrupt signal (KeyboardInterrupt), the system safely exits.")
             break

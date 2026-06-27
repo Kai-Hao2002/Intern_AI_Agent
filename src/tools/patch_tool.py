@@ -33,6 +33,23 @@ def read_file_tool(file_path: str) -> str:
         )
     except Exception as e:
         return f"❌ 讀取檔案時發生錯誤: {e}"
+
+@tool
+def execute_bash_command(command: str) -> str:
+    """
+    【終端機工具】用於執行簡單的 Linux/Mac 指令，例如尋找檔案 (find)、移動檔案 (mv)、複製 (cp) 或查看目錄 (ls)。
+    當需要還原檔案、重新命名檔案或尋找專案結構時，請使用此工具。
+    [Terminal Tool] Used to execute bash commands like mv, cp, ls, find, etc.
+    """
+    print(f"\n💻 [Bash Tool] 執行指令: {command}")
+    try:
+        result = subprocess.run(command, shell=True, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            return f"✅ Command executed successfully:\n{result.stdout}"
+        else:
+            return f"❌ Command failed (Exit Code {result.returncode}):\n{result.stderr}"
+    except Exception as e:
+        return f"❌ Error executing command: {e}"
     
 @tool
 def apply_patch_tool(file_path: str, search_context: str, replace_content: str) -> str:
